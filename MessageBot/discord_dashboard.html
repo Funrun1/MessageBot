@@ -1,0 +1,158 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Discord Message Dashboard</title>
+<style>
+    body {
+        font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+        background: #1e1e2f;
+        color: #f0f0f0;
+        margin: 0;
+        padding: 0;
+    }
+    header {
+        background: #3b3b5f;
+        padding: 20px;
+        text-align: center;
+        font-size: 1.8em;
+        font-weight: bold;
+        color: #ffcc00;
+    }
+    main {
+        max-width: 1000px;
+        margin: 20px auto;
+        padding: 0 20px;
+    }
+    section {
+        background: #2a2a40;
+        margin-bottom: 20px;
+        padding: 20px;
+        border-radius: 12px;
+        box-shadow: 0 4px 15px rgba(0,0,0,0.5);
+    }
+    h2 {
+        margin-top: 0;
+        color: #ffcc00;
+    }
+    ul {
+        list-style: none;
+        padding-left: 0;
+    }
+    li {
+        margin: 6px 0;
+        font-size: 1.1em;
+    }
+    canvas {
+        background: #1e1e2f;
+        border-radius: 12px;
+    }
+    .loader {
+        text-align: center;
+        font-size: 1.2em;
+        padding: 20px;
+    }
+</style>
+</head>
+<body>
+<header>Discord Message Tracker Dashboard</header>
+<main>
+    <section>
+        <h2>🏆 Top Chatters</h2>
+        <div id="leaderboard" class="loader">Loading...</div>
+    </section>
+
+    <section>
+        <h2>🚀 Rising Stars</h2>
+        <div id="rising" class="loader">Loading...</div>
+    </section>
+
+    <section>
+        <h2>📈 Messages Per Day (Last 30 Days)</h2>
+        <canvas id="dailyChart" width="900" height="400"></canvas>
+    </section>
+</main>
+
+<!-- Chart.js CDN -->
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<script>
+const API_BASE = 'http://localhost:5000/api';
+
+async function fetchData(endpoint) {
+    try {
+        const res = await fetch(`${API_BASE}/${endpoint}`);
+        return await res.json();
+    } catch(e) {
+        return [];
+    }
+}
+
+function renderLeaderboard(data) {
+    const container = document.getElementById('leaderboard');
+    if (!data.length) {
+        container.innerHTML = 'No messages yet.';
+        return;
+    }
+    const html = data.slice(0, 10).map((u,i) => `<li>${i+1}. ${u.username} - ${u.total} msgs</li>`).join('');
+    container.innerHTML = `<ul>${html}</ul>`;
+}
+
+function renderRising(data) {
+    const container = document.getElementById('rising');
+    if (!data.length) {
+        container.innerHTML = 'No recent growth.';
+        return;
+    }
+    const html = data.slice(0, 10).map(u => `<li>${u.username}: +${u.growth_pct}%</li>`).join('');
+    container.innerHTML = `<ul>${html}</ul>`;
+}
+
+async function renderDailyChart() {
+    const data = await fetchData('daily');
+    const ctx = document.getElementById('dailyChart').getContext('2d');
+    const labels = data.map(d => d.day);
+    const counts = data.map(d => d.count);
+    new Chart(ctx, {
+        type: 'line',
+        data: {
+            labels,
+            datasets: [{
+                label: 'Messages per Day',
+                data: counts,
+                borderColor: '#ffcc00',
+                backgroundColor: 'rgba(255,204,0,0.3)',
+                tension: 0.3,
+                fill: true,
+                pointRadius: 4
+            }]
+        },
+        options: {
+            responsive: true,
+            plugins: {
+                legend: { labels: { color: '#ffcc00' } }
+            },
+            scales: {
+                x: { ticks: { color: '#f0f0f0' } },
+                y: { ticks: { color: '#f0f0f0' }, beginAtZero: true }
+            }
+        }
+    });
+}
+
+async function updateDashboard() {
+    const [leaderboard, rising] = await Promise.all([
+        fetchData('leaderboard'),
+        fetchData('rising')
+    ]);
+    renderLeaderboard(leaderboard);
+    renderRising(rising);
+    renderDailyChart();
+}
+
+// Auto-refresh every 30 seconds
+updateDashboard();
+setInterval(updateDashboard, 30000);
+</script>
+</body>
+</html>
