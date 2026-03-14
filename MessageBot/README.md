@@ -9,7 +9,15 @@ A Discord message tracking bot that records message counts per user and provides
 python -m pip install -r requirements.txt
 ```
 
-2. Create a `.env` file in the repo root (next to `discord_tracker_bot.py`) with your bot token:
+2. Create a `.env` file in the repo root (next to `discord_tracker_bot.py`) with your bot token.
+
+   You can start by copying the provided example:
+
+```bash
+cp .env.example .env
+```
+
+   And then edit `.env` to set your token:
 
 ```env
 # Either of these will work:
