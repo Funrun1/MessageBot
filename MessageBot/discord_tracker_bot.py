@@ -74,11 +74,11 @@ def get_summary_stats(guild_id=None):
     if guild_id:
         total = conn.execute("SELECT COUNT(*) FROM messages WHERE guild_id=?", (str(guild_id),)).fetchone()[0]
         users = conn.execute("SELECT COUNT(DISTINCT user_id) FROM messages WHERE guild_id=?", (str(guild_id),)).fetchone()[0]
-        today = conn.execute("SELECT COUNT(*) FROM messages WHERE guild_id=? AND DATE(timestamp)=DATE('now')", (str(guild_id),)).fetchone()[0]
+        today = conn.execute("SELECT COUNT(*) FROM messages WHERE guild_id=? AND DATE(timestamp)=DATE('now', 'utc')", (str(guild_id),)).fetchone()[0]
     else:
         total = conn.execute("SELECT COUNT(*) FROM messages").fetchone()[0]
-        users = conn.execute("SELECT COUNT(DISTINCT user_id)").fetchone()[0]
-        today = conn.execute("SELECT COUNT(*) FROM messages WHERE DATE(timestamp)=DATE('now')").fetchone()[0]
+        users = conn.execute("SELECT COUNT(DISTINCT user_id) FROM messages").fetchone()[0]
+        today = conn.execute("SELECT COUNT(*) FROM messages WHERE DATE(timestamp)=DATE('now', 'utc')").fetchone()[0]
     conn.close()
     return {"total_messages": total, "unique_users": users, "today": today}
 
@@ -200,7 +200,6 @@ async def on_ready():
     print(f"✅ Logged in as {bot.user} (ID: {bot.user.id})")
     print(f"📊 Dashboard API: http://localhost:{FLASK_PORT}")
     print(f"📁 Database: {DB_PATH}")
-    # Sync slash commands
     await bot.tree.sync()
     print("🌍 Slash commands synced!")
 
@@ -220,23 +219,36 @@ async def on_message(message):
 @bot.tree.command(name="leaderboard", description="Show top chatters")
 async def leaderboard(interaction: discord.Interaction):
     data = get_leaderboard(guild_id=interaction.guild.id if interaction.guild else None)
+    if not data:
+        await interaction.response.send_message("No data yet!")
+        return
     text = "\n".join([f"{i+1}. {u['username']} - {u['total']}" for i, u in enumerate(data[:10])])
     await interaction.response.send_message(f"📊 Top Chatters:\n{text}")
 
 @bot.tree.command(name="stats", description="Show server stats")
 async def stats(interaction: discord.Interaction):
     data = get_summary_stats(guild_id=interaction.guild.id if interaction.guild else None)
-    await interaction.response.send_message(f"📈 Total Messages: {data['total_messages']}\n👥 Unique Users: {data['unique_users']}\n🗓️ Today: {data['today']}")
+    await interaction.response.send_message(
+        f"📈 Total Messages: {data['total_messages']}\n"
+        f"👥 Unique Users: {data['unique_users']}\n"
+        f"🗓️ Today: {data['today']}"
+    )
 
 @bot.tree.command(name="rising", description="Show rising chatters")
 async def rising(interaction: discord.Interaction):
     data = get_rising_users(guild_id=interaction.guild.id if interaction.guild else None)
+    if not data:
+        await interaction.response.send_message("Not enough data yet!")
+        return
     text = "\n".join([f"{u['username']}: +{u['growth_pct']}%" for u in data[:10]])
     await interaction.response.send_message(f"🚀 Rising Stars:\n{text}")
 
 @bot.tree.command(name="daily", description="Show daily message counts")
 async def daily(interaction: discord.Interaction):
     data = get_daily_counts(guild_id=interaction.guild.id if interaction.guild else None)
+    if not data:
+        await interaction.response.send_message("No data yet!")
+        return
     text = "\n".join([f"{r['day']}: {r['count']}" for r in data])
     await interaction.response.send_message(f"🗓️ Daily Messages:\n{text}")
 
@@ -244,6 +256,9 @@ async def daily(interaction: discord.Interaction):
 @app_commands.describe(user="Select a user")
 async def user_trend(interaction: discord.Interaction, user: discord.User):
     data = get_user_trend(user_id=user.id, guild_id=interaction.guild.id if interaction.guild else None)
+    if not data:
+        await interaction.response.send_message(f"No data found for {user}.")
+        return
     text = "\n".join([f"{r['day']}: {r['count']}" for r in data])
     await interaction.response.send_message(f"📈 Message Trend for {user}:\n{text}")
 
