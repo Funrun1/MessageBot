@@ -4,12 +4,13 @@ import threading
 from datetime import datetime, timedelta, timezone
 
 import discord
+from discord.ext import commands
 from discord import app_commands
 from flask import Flask, jsonify
 from flask_cors import CORS
 from dotenv import load_dotenv
 
-# ── Load environment ─────────────────────────────────────────────────────────
+# ── ENVIRONMENT ───────────────────────────────────────────────────────────────
 load_dotenv()
 TOKEN = os.getenv("DISCORD_BOT_TOKEN")
 FLASK_PORT = int(os.getenv("PORT", 5000))
@@ -17,7 +18,7 @@ FLASK_PORT = int(os.getenv("PORT", 5000))
 if not TOKEN:
     raise ValueError("⚠️ DISCORD_BOT_TOKEN is missing in environment variables.")
 
-# ── Database setup ───────────────────────────────────────────────────────────
+# ── DATABASE ───────────────────────────────────────────────────────────────────
 BASE_DIR = os.path.dirname(__file__)
 DB_PATH = os.path.join(BASE_DIR, "message_stats.db")
 
@@ -52,7 +53,7 @@ def record_message(user_id, username, guild_id, channel_id):
     conn.commit()
     conn.close()
 
-# ── Stats functions ──────────────────────────────────────────────────────────
+# ── STATS FUNCTIONS ───────────────────────────────────────────────────────────
 def get_leaderboard(guild_id=None, limit=20):
     conn = get_db()
     if guild_id:
@@ -191,16 +192,17 @@ def run_flask():
 intents = discord.Intents.default()
 intents.message_content = True
 intents.members = True
-bot = discord.Bot(intents=intents)  # correct Bot for slash commands
+
+bot = commands.Bot(command_prefix="!", intents=intents)
 
 @bot.event
 async def on_ready():
     print(f"✅ Logged in as {bot.user} (ID: {bot.user.id})")
     print(f"📊 Dashboard API: http://localhost:{FLASK_PORT}")
     print(f"📁 Database: {DB_PATH}")
-    # Sync slash commands to Discord
+    # Sync slash commands
     await bot.tree.sync()
-    print("🌐 Slash commands synced!")
+    print("🌍 Slash commands synced!")
 
 @bot.event
 async def on_message(message):
@@ -212,6 +214,7 @@ async def on_message(message):
         guild_id=message.guild.id if message.guild else "DM",
         channel_id=message.channel.id
     )
+    await bot.process_commands(message)
 
 # ── Slash Commands ───────────────────────────────────────────────────────────
 @bot.tree.command(name="leaderboard", description="Show top chatters")
@@ -244,7 +247,7 @@ async def user_trend(interaction: discord.Interaction, user: discord.User):
     text = "\n".join([f"{r['day']}: {r['count']}" for r in data])
     await interaction.response.send_message(f"📈 Message Trend for {user}:\n{text}")
 
-# ── Main ─────────────────────────────────────────────────────────────────────
+# ── Run main ─────────────────────────────────────────────────────────────────
 if __name__ == "__main__":
     init_db()
     threading.Thread(target=run_flask, daemon=True).start()
