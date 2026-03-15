@@ -206,20 +206,19 @@ class BotClient(commands.Bot):
         print(f"📊 Dashboard API: http://localhost:{FLASK_PORT}")
         print(f"📁 Database: {DB_PATH}")
 
-bot = BotClient(command_prefix="!", intents=intents)
+    async def on_message(self, message):
+        if message.author.bot:
+            return
+        record_message(
+            user_id=message.author.id,
+            username=str(message.author),
+            guild_id=message.guild.id if message.guild else "DM",
+            channel_id=message.channel.id
+        )
+        if message.content.startswith("!"):
+            await self.process_commands(message)
 
-@bot.event
-async def on_message(message):
-    if message.author.bot:
-        return
-    record_message(
-        user_id=message.author.id,
-        username=str(message.author),
-        guild_id=message.guild.id if message.guild else "DM",
-        channel_id=message.channel.id
-    )
-    if message.content.startswith("!"):
-        await bot.process_commands(message)
+bot = BotClient(command_prefix="!", intents=intents)
 
 # ── Slash Commands ───────────────────────────────────────────────────────────
 @bot.tree.command(name="leaderboard", description="Show top chatters")
@@ -308,6 +307,40 @@ async def backfill(interaction: discord.Interaction):
         f"⏭️ Skipped channels (no access): {skipped}",
         ephemeral=True
     )
+
+@bot.command(name="backfill")
+@commands.has_permissions(administrator=True)
+async def backfill_prefix(ctx):
+    msg = await ctx.send("⏳ Starting backfill... this may take a while!")
+    guild = ctx.guild
+    total = 0
+    skipped = 0
+
+    for channel in guild.text_channels:
+        if not channel.permissions_for(guild.me).read_message_history:
+            skipped += 1
+            continue
+        try:
+            async for message in channel.history(limit=1000, oldest_first=True):
+                if message.author.bot:
+                    continue
+                record_message(
+                    user_id=message.author.id,
+                    username=str(message.author),
+                    guild_id=str(guild.id),
+                    channel_id=str(channel.id)
+                )
+                total += 1
+        except discord.Forbidden:
+            skipped += 1
+        except Exception as e:
+            print(f"❌ Error backfilling #{channel.name}: {e}")
+
+    await msg.edit(content=(
+        f"✅ Backfill complete!\n"
+        f"📥 Imported: {total} messages\n"
+        f"⏭️ Skipped channels (no access): {skipped}"
+    ))
 
 # ── Run main ─────────────────────────────────────────────────────────────────
 if __name__ == "__main__":
