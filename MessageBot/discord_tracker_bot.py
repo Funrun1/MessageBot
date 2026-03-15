@@ -1,8 +1,8 @@
 """
-Discord Message Tracker Bot
-============================
+Discord Message Tracker Bot with Slash Commands
+================================================
 Tracks messages per user across all channels, stores stats in a local SQLite DB,
-and serves a live dashboard API.
+and serves a live dashboard API. All commands are now slash commands.
 """
 
 import os
@@ -11,11 +11,12 @@ import threading
 import time
 from datetime import datetime, timedelta, timezone
 
+from discord.ext import commands
 import discord
 from flask import Flask, jsonify
 from flask_cors import CORS
 
-# ── Config ──────────────────────────────────────────────────────────────────
+# ── Config ───────────────────────────────────────────────────────────────
 BASE_DIR = os.path.dirname(__file__)
 DB_PATH = os.path.join(BASE_DIR, "message_stats.db")
 FLASK_PORT = int(os.environ.get("PORT", 5000))  # Render sets PORT automatically
@@ -58,7 +59,7 @@ def record_message(user_id, username, guild_id, channel_id):
     conn.commit()
     conn.close()
 
-# ── Stats queries ────────────────────────────────────────────────────────────
+# ── Stats queries ───────────────────────────────────────────────────────────
 def get_leaderboard(guild_id=None, limit=20):
     conn = get_db()
     if guild_id:
@@ -159,7 +160,6 @@ def get_rising_users(guild_id=None, days_recent=7, days_compare=7):
             """,
             (recent_start, str(guild_id)),
         ).fetchall()
-
         prev = conn.execute(
             """
             SELECT user_id, COUNT(*) as cnt
@@ -179,7 +179,6 @@ def get_rising_users(guild_id=None, days_recent=7, days_compare=7):
             """,
             (recent_start,),
         ).fetchall()
-
         prev = conn.execute(
             """
             SELECT user_id, COUNT(*) as cnt
@@ -191,7 +190,6 @@ def get_rising_users(guild_id=None, days_recent=7, days_compare=7):
         ).fetchall()
 
     conn.close()
-
     prev_map = {r["user_id"]: r["cnt"] for r in prev}
     results = []
     for r in recent:
@@ -219,7 +217,7 @@ def get_summary_stats(guild_id=None):
         ).fetchone()[0]
     else:
         total = conn.execute("SELECT COUNT(*) FROM messages").fetchone()[0]
-        users = conn.execute("SELECT COUNT(DISTINCT user_id) FROM messages").fetchone()[0]
+        users = conn.execute("SELECT COUNT(DISTINCT user_id)").fetchone()[0]
         today = conn.execute("SELECT COUNT(*) FROM messages WHERE DATE(timestamp) = DATE('now')").fetchone()[0]
     conn.close()
     return {"total_messages": total, "unique_users": users, "today": today}
@@ -255,24 +253,24 @@ def api_user_trend(user_id):
 def run_flask():
     app.run(host="0.0.0.0", port=FLASK_PORT, debug=False, use_reloader=False)
 
-# ── Discord Bot ──────────────────────────────────────────────────────────────
+# ── Discord Bot (Slash Commands) ────────────────────────────────────────────
 intents = discord.Intents.default()
 intents.message_content = True
 intents.members = True
-bot = discord.Client(intents=intents)
+
+bot = commands.Bot(command_prefix="!", intents=intents)
 
 @bot.event
 async def on_ready():
     print(f"✅ Logged in as {bot.user} (ID: {bot.user.id})")
-    print(f"📊 Dashboard API: http://localhost:{FLASK_PORT}")
+    print(f"🌐 Dashboard API: http://localhost:{FLASK_PORT}")
     print(f"📁 Database:  {DB_PATH}")
 
+# Record messages in DB automatically
 @bot.event
 async def on_message(message):
     if message.author.bot:
         return
-
-    # Record message in DB
     record_message(
         user_id=message.author.id,
         username=str(message.author),
@@ -280,23 +278,28 @@ async def on_message(message):
         channel_id=message.channel.id
     )
 
-    # Discord commands
-    content = message.content.lower()
-    if content == "!leaderboard":
-        leaderboard = get_leaderboard(guild_id=message.guild.id if message.guild else None)
-        text = "\n".join([f"{i+1}. {u['username']} - {u['total']}" for i, u in enumerate(leaderboard[:10])])
-        await message.channel.send(f"📊 Top Chatters:\n{text}")
+# Slash commands
+@bot.slash_command(name="leaderboard", description="Show top chatters")
+async def leaderboard(ctx):
+    guild_id = ctx.guild.id if ctx.guild else None
+    data = get_leaderboard(guild_id=guild_id)
+    text = "\n".join([f"{i+1}. {u['username']} - {u['total']}" for i, u in enumerate(data[:10])])
+    await ctx.respond(f"📊 Top Chatters:\n{text}")
 
-    elif content == "!stats":
-        stats = get_summary_stats(guild_id=message.guild.id if message.guild else None)
-        await message.channel.send(f"📈 Total Messages: {stats['total_messages']}\n"
-                                   f"👥 Unique Users: {stats['unique_users']}\n"
-                                   f"🗓️ Today: {stats['today']}")
+@bot.slash_command(name="stats", description="Show message stats")
+async def stats(ctx):
+    guild_id = ctx.guild.id if ctx.guild else None
+    data = get_summary_stats(guild_id=guild_id)
+    await ctx.respond(f"📈 Total Messages: {data['total_messages']}\n"
+                      f"👥 Unique Users: {data['unique_users']}\n"
+                      f"🗓️ Today: {data['today']}")
 
-    elif content == "!rising":
-        rising = get_rising_users(guild_id=message.guild.id if message.guild else None)
-        text = "\n".join([f"{u['username']}: +{u['growth_pct']}%" for u in rising[:10]])
-        await message.channel.send(f"🚀 Rising Stars:\n{text}")
+@bot.slash_command(name="rising", description="Show rising users")
+async def rising(ctx):
+    guild_id = ctx.guild.id if ctx.guild else None
+    data = get_rising_users(guild_id=guild_id)
+    text = "\n".join([f"{u['username']}: +{u['growth_pct']}%" for u in data[:10]])
+    await ctx.respond(f"🚀 Rising Stars:\n{text}")
 
 # ── Main ─────────────────────────────────────────────────────────────────────
 if __name__ == "__main__":
@@ -308,9 +311,9 @@ if __name__ == "__main__":
     print(f"🌐 Dashboard API started on port {FLASK_PORT}")
 
     # Run the Discord bot
-    if not TOKEN:
+    if TOKEN:
+        bot.run(TOKEN)
+    else:
         print("⚠️  Discord bot token is missing! Cannot start bot.")
         while True:
             time.sleep(1)
-    else:
-        bot.run(TOKEN)
