@@ -268,6 +268,47 @@ async def user_trend(interaction: discord.Interaction, user: discord.User):
     text = "\n".join([f"{r['day']}: {r['count']}" for r in data])
     await interaction.response.send_message(f"📈 Message Trend for {user}:\n{text}")
 
+@bot.tree.command(name="backfill", description="Backfill message history from all channels (admin only)")
+async def backfill(interaction: discord.Interaction):
+    # Only allow server admins to run this
+    if not interaction.user.guild_permissions.administrator:
+        await interaction.response.send_message("❌ You need to be an admin to run this.", ephemeral=True)
+        return
+
+    await interaction.response.send_message("⏳ Starting backfill... this may take a while!", ephemeral=True)
+
+    guild = interaction.guild
+    total = 0
+    skipped = 0
+
+    for channel in guild.text_channels:
+        # Check if bot has permission to read this channel
+        if not channel.permissions_for(guild.me).read_message_history:
+            skipped += 1
+            continue
+        try:
+            async for message in channel.history(limit=1000, oldest_first=True):
+                if message.author.bot:
+                    continue
+                record_message(
+                    user_id=message.author.id,
+                    username=str(message.author),
+                    guild_id=str(guild.id),
+                    channel_id=str(channel.id)
+                )
+                total += 1
+        except discord.Forbidden:
+            skipped += 1
+        except Exception as e:
+            print(f"❌ Error backfilling #{channel.name}: {e}")
+
+    await interaction.followup.send(
+        f"✅ Backfill complete!\n"
+        f"📥 Imported: {total} messages\n"
+        f"⏭️ Skipped channels (no access): {skipped}",
+        ephemeral=True
+    )
+
 # ── Run main ─────────────────────────────────────────────────────────────────
 if __name__ == "__main__":
     init_db()
