@@ -6,6 +6,9 @@ and serves a live dashboard API.
 """
 
 import os
+
+print("Loaded token:", os.getenv("DISCORD_BOT_TOKEN"))
+
 import sqlite3
 import threading
 import time
