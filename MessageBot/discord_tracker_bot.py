@@ -1,16 +1,11 @@
-"""
-Discord Message Tracker Bot (Full Slash Commands)
-Tracks messages per user across all channels, stores stats in SQLite,
-and serves a live Flask dashboard API.
-"""
-
 import os
 import sqlite3
 import threading
 from datetime import datetime, timedelta, timezone
 
 import discord
-from discord import Option
+from discord.commands import Option  # Correct import for discord.py >=2.0
+from discord.ext import commands
 from flask import Flask, jsonify
 from flask_cors import CORS
 from dotenv import load_dotenv
@@ -197,7 +192,7 @@ def run_flask():
 intents = discord.Intents.default()
 intents.message_content = True
 intents.members = True
-bot = discord.Bot(intents=intents)
+bot = commands.Bot(command_prefix="!", intents=intents)
 
 @bot.event
 async def on_ready():
@@ -215,6 +210,7 @@ async def on_message(message):
         guild_id=message.guild.id if message.guild else "DM",
         channel_id=message.channel.id
     )
+    await bot.process_commands(message)  # important for commands to work
 
 # ── Slash Commands ───────────────────────────────────────────────────────────
 @bot.slash_command(name="leaderboard", description="Show top chatters")
