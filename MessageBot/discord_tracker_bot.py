@@ -2,7 +2,7 @@
 Discord Message Tracker Bot
 ============================
 Tracks messages per user across all channels, stores stats in a local SQLite DB,
-and serves a live dashboard API at http://localhost:5000
+and serves a live dashboard API.
 """
 
 import os
@@ -11,46 +11,20 @@ import threading
 import time
 from datetime import datetime, timedelta, timezone
 
-# Support optional python-dotenv dependency; the bot works without it.
-try:
-    from dotenv import load_dotenv
-except ImportError:  # pragma: no cover
-    def load_dotenv(dotenv_path=".env", override=False):
-        """Minimal .env loader (fallback when python-dotenv is not installed)."""
-        try:
-            with open(dotenv_path, "r", encoding="utf-8") as f:
-                for line in f:
-                    line = line.strip()
-                    if not line or line.startswith("#"):
-                        continue
-                    if "=" not in line:
-                        continue
-                    key, val = line.split("=", 1)
-                    key = key.strip()
-                    val = val.strip().strip('"').strip("'")
-                    if override or key not in os.environ:
-                        os.environ[key] = val
-            return True
-        except FileNotFoundError:
-            return False
-
 import discord
 from flask import Flask, jsonify
 from flask_cors import CORS
 
 # ── Config ──────────────────────────────────────────────────────────────────
 BASE_DIR = os.path.dirname(__file__)
-DOTENV_PATH = os.path.join(BASE_DIR, ".env")
-loaded_env = load_dotenv(dotenv_path=DOTENV_PATH)
-print("dotenv:", DOTENV_PATH, "exists?", os.path.exists(DOTENV_PATH), "loaded?", loaded_env)
-
-TOKEN = (os.getenv("DISCORD_TOKEN") or os.getenv("DISCORD_BOT_TOKEN") or "").strip()
-if TOKEN == "":
-    TOKEN = None
-
-print("Loaded token:", "YES" if TOKEN else "NO")
 DB_PATH = os.path.join(BASE_DIR, "message_stats.db")
-FLASK_PORT = 5000
+FLASK_PORT = int(os.environ.get("PORT", 5000))  # Render sets PORT automatically
+
+# Discord token from environment variable
+TOKEN = os.getenv("DISCORD_BOT_TOKEN")
+if not TOKEN:
+    print("⚠️  No bot token set! Set DISCORD_BOT_TOKEN in environment variables.")
+    TOKEN = None
 
 # ── Database setup ───────────────────────────────────────────────────────────
 def get_db():
@@ -238,27 +212,15 @@ def get_rising_users(guild_id=None, days_recent=7, days_compare=7):
 def get_summary_stats(guild_id=None):
     conn = get_db()
     if guild_id:
-        total = conn.execute(
-            "SELECT COUNT(*) FROM messages WHERE guild_id = ?",
-            (str(guild_id),),
-        ).fetchone()[0]
-        users = conn.execute(
-            "SELECT COUNT(DISTINCT user_id) FROM messages WHERE guild_id = ?",
-            (str(guild_id),),
-        ).fetchone()[0]
+        total = conn.execute("SELECT COUNT(*) FROM messages WHERE guild_id = ?", (str(guild_id),)).fetchone()[0]
+        users = conn.execute("SELECT COUNT(DISTINCT user_id) FROM messages WHERE guild_id = ?", (str(guild_id),)).fetchone()[0]
         today = conn.execute(
-            """
-            SELECT COUNT(*) FROM messages
-            WHERE guild_id = ? AND DATE(timestamp) = DATE('now')
-            """,
-            (str(guild_id),),
+            "SELECT COUNT(*) FROM messages WHERE guild_id = ? AND DATE(timestamp) = DATE('now')", (str(guild_id),)
         ).fetchone()[0]
     else:
         total = conn.execute("SELECT COUNT(*) FROM messages").fetchone()[0]
         users = conn.execute("SELECT COUNT(DISTINCT user_id) FROM messages").fetchone()[0]
-        today = conn.execute(
-            "SELECT COUNT(*) FROM messages WHERE DATE(timestamp) = DATE('now')",
-        ).fetchone()[0]
+        today = conn.execute("SELECT COUNT(*) FROM messages WHERE DATE(timestamp) = DATE('now')").fetchone()[0]
     conn.close()
     return {"total_messages": total, "unique_users": users, "today": today}
 
@@ -291,7 +253,7 @@ def api_user_trend(user_id):
     return jsonify(get_user_trend(user_id))
 
 def run_flask():
-    app.run(port=FLASK_PORT, debug=False, use_reloader=False)
+    app.run(host="0.0.0.0", port=FLASK_PORT, debug=False, use_reloader=False)
 
 # ── Discord Bot ──────────────────────────────────────────────────────────────
 intents = discord.Intents.default()
@@ -302,7 +264,7 @@ bot = discord.Client(intents=intents)
 @bot.event
 async def on_ready():
     print(f"✅ Logged in as {bot.user} (ID: {bot.user.id})")
-    print(f"📊 Dashboard: http://localhost:{FLASK_PORT}")
+    print(f"📊 Dashboard API: http://localhost:{FLASK_PORT}")
     print(f"📁 Database:  {DB_PATH}")
 
 @bot.event
@@ -319,18 +281,19 @@ async def on_message(message):
     )
 
     # Discord commands
-    if message.content.lower() == "!leaderboard":
+    content = message.content.lower()
+    if content == "!leaderboard":
         leaderboard = get_leaderboard(guild_id=message.guild.id if message.guild else None)
         text = "\n".join([f"{i+1}. {u['username']} - {u['total']}" for i, u in enumerate(leaderboard[:10])])
         await message.channel.send(f"📊 Top Chatters:\n{text}")
 
-    elif message.content.lower() == "!stats":
+    elif content == "!stats":
         stats = get_summary_stats(guild_id=message.guild.id if message.guild else None)
         await message.channel.send(f"📈 Total Messages: {stats['total_messages']}\n"
                                    f"👥 Unique Users: {stats['unique_users']}\n"
                                    f"🗓️ Today: {stats['today']}")
 
-    elif message.content.lower() == "!rising":
+    elif content == "!rising":
         rising = get_rising_users(guild_id=message.guild.id if message.guild else None)
         text = "\n".join([f"{u['username']}: +{u['growth_pct']}%" for u in rising[:10]])
         await message.channel.send(f"🚀 Rising Stars:\n{text}")
@@ -345,8 +308,8 @@ if __name__ == "__main__":
     print(f"🌐 Dashboard API started on port {FLASK_PORT}")
 
     # Run the Discord bot
-    if not TOKEN or TOKEN == "YOUR_BOT_TOKEN_HERE":
-        print("\n⚠️  No bot token set! Set the DISCORD_TOKEN environment variable (or add it to .env) before running.")
+    if not TOKEN:
+        print("⚠️  Discord bot token is missing! Cannot start bot.")
         while True:
             time.sleep(1)
     else:
