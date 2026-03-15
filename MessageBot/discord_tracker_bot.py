@@ -200,8 +200,11 @@ async def on_ready():
     print(f"✅ Logged in as {bot.user} (ID: {bot.user.id})")
     print(f"📊 Dashboard API: http://localhost:{FLASK_PORT}")
     print(f"📁 Database: {DB_PATH}")
-    await bot.tree.sync()
-    print("🌍 Slash commands synced!")
+    try:
+        synced = await bot.tree.sync()
+        print(f"🌍 Synced {len(synced)} slash commands globally!")
+    except Exception as e:
+        print(f"❌ Failed to sync commands: {e}")
 
 @bot.event
 async def on_message(message):
