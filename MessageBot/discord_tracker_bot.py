@@ -200,11 +200,15 @@ async def on_ready():
     print(f"✅ Logged in as {bot.user} (ID: {bot.user.id})")
     print(f"📊 Dashboard API: http://localhost:{FLASK_PORT}")
     print(f"📁 Database: {DB_PATH}")
+
+async def setup_hook():
     try:
         synced = await bot.tree.sync()
         print(f"🌍 Synced {len(synced)} slash commands globally!")
     except Exception as e:
         print(f"❌ Failed to sync commands: {e}")
+
+bot.setup_hook = setup_hook
 
 @bot.event
 async def on_message(message):
@@ -216,7 +220,8 @@ async def on_message(message):
         guild_id=message.guild.id if message.guild else "DM",
         channel_id=message.channel.id
     )
-    await bot.process_commands(message)
+    if message.content.startswith("!"):
+        await bot.process_commands(message)
 
 # ── Slash Commands ───────────────────────────────────────────────────────────
 @bot.tree.command(name="leaderboard", description="Show top chatters")
