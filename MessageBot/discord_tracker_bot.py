@@ -1,8 +1,8 @@
 """
-Discord Message Tracker Bot with Slash Commands
-================================================
+Discord Message Tracker Bot (Slash Commands)
+============================================
 Tracks messages per user across all channels, stores stats in a local SQLite DB,
-and serves a live dashboard API. All commands are now slash commands.
+and serves a live dashboard API.
 """
 
 import os
@@ -11,23 +11,24 @@ import threading
 import time
 from datetime import datetime, timedelta, timezone
 
-from discord.ext import commands
 import discord
 from flask import Flask, jsonify
 from flask_cors import CORS
+from dotenv import load_dotenv
 
-# ── Config ───────────────────────────────────────────────────────────────
-BASE_DIR = os.path.dirname(__file__)
-DB_PATH = os.path.join(BASE_DIR, "message_stats.db")
-FLASK_PORT = int(os.environ.get("PORT", 5000))  # Render sets PORT automatically
-
-# Discord token from environment variable
+# ── Load environment ─────────────────────────────────────────────────────────
+load_dotenv()
 TOKEN = os.getenv("DISCORD_BOT_TOKEN")
+FLASK_PORT = int(os.getenv("PORT", 5000))
+
 if not TOKEN:
     print("⚠️  No bot token set! Set DISCORD_BOT_TOKEN in environment variables.")
     TOKEN = None
 
 # ── Database setup ───────────────────────────────────────────────────────────
+BASE_DIR = os.path.dirname(__file__)
+DB_PATH = os.path.join(BASE_DIR, "message_stats.db")
+
 def get_db():
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
@@ -59,7 +60,7 @@ def record_message(user_id, username, guild_id, channel_id):
     conn.commit()
     conn.close()
 
-# ── Stats queries ───────────────────────────────────────────────────────────
+# ── Stats queries ────────────────────────────────────────────────────────────
 def get_leaderboard(guild_id=None, limit=20):
     conn = get_db()
     if guild_id:
@@ -72,7 +73,7 @@ def get_leaderboard(guild_id=None, limit=20):
             ORDER BY total DESC
             LIMIT ?
             """,
-            (str(guild_id), int(limit)),
+            (str(guild_id), limit)
         ).fetchall()
     else:
         rows = conn.execute(
@@ -83,7 +84,7 @@ def get_leaderboard(guild_id=None, limit=20):
             ORDER BY total DESC
             LIMIT ?
             """,
-            (int(limit),),
+            (limit,)
         ).fetchall()
     conn.close()
     return [dict(r) for r in rows]
@@ -116,34 +117,6 @@ def get_daily_counts(guild_id=None, days=30):
     conn.close()
     return [dict(r) for r in rows]
 
-def get_user_trend(user_id, guild_id=None, days=14):
-    conn = get_db()
-    since = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
-    if guild_id:
-        rows = conn.execute(
-            """
-            SELECT DATE(timestamp) as day, COUNT(*) as count
-            FROM messages
-            WHERE user_id = ? AND timestamp >= ? AND guild_id = ?
-            GROUP BY day
-            ORDER BY day
-            """,
-            (str(user_id), since, str(guild_id)),
-        ).fetchall()
-    else:
-        rows = conn.execute(
-            """
-            SELECT DATE(timestamp) as day, COUNT(*) as count
-            FROM messages
-            WHERE user_id = ? AND timestamp >= ?
-            GROUP BY day
-            ORDER BY day
-            """,
-            (str(user_id), since),
-        ).fetchall()
-    conn.close()
-    return [dict(r) for r in rows]
-
 def get_rising_users(guild_id=None, days_recent=7, days_compare=7):
     conn = get_db()
     now = datetime.now(timezone.utc)
@@ -160,6 +133,7 @@ def get_rising_users(guild_id=None, days_recent=7, days_compare=7):
             """,
             (recent_start, str(guild_id)),
         ).fetchall()
+
         prev = conn.execute(
             """
             SELECT user_id, COUNT(*) as cnt
@@ -179,6 +153,7 @@ def get_rising_users(guild_id=None, days_recent=7, days_compare=7):
             """,
             (recent_start,),
         ).fetchall()
+
         prev = conn.execute(
             """
             SELECT user_id, COUNT(*) as cnt
@@ -199,7 +174,7 @@ def get_rising_users(guild_id=None, days_recent=7, days_compare=7):
         pct = ((new - old) / old * 100) if old else (100.0 if new > 0 else 0.0)
         results.append({
             "user_id": uid,
-            "username": r["username"],
+            "username": r.get("username", "Unknown"),
             "recent": new,
             "previous": old,
             "growth_pct": round(pct, 1)
@@ -253,20 +228,19 @@ def api_user_trend(user_id):
 def run_flask():
     app.run(host="0.0.0.0", port=FLASK_PORT, debug=False, use_reloader=False)
 
-# ── Discord Bot (Slash Commands) ────────────────────────────────────────────
+# ── Discord Bot ──────────────────────────────────────────────────────────────
 intents = discord.Intents.default()
 intents.message_content = True
 intents.members = True
 
-bot = commands.Bot(command_prefix="!", intents=intents)
+bot = discord.Bot(intents=intents)
 
 @bot.event
 async def on_ready():
     print(f"✅ Logged in as {bot.user} (ID: {bot.user.id})")
-    print(f"🌐 Dashboard API: http://localhost:{FLASK_PORT}")
+    print(f"📊 Dashboard API: http://localhost:{FLASK_PORT}")
     print(f"📁 Database:  {DB_PATH}")
 
-# Record messages in DB automatically
 @bot.event
 async def on_message(message):
     if message.author.bot:
@@ -278,27 +252,24 @@ async def on_message(message):
         channel_id=message.channel.id
     )
 
-# Slash commands
+# ── Slash Commands ───────────────────────────────────────────────────────────
 @bot.slash_command(name="leaderboard", description="Show top chatters")
-async def leaderboard(ctx):
-    guild_id = ctx.guild.id if ctx.guild else None
-    data = get_leaderboard(guild_id=guild_id)
-    text = "\n".join([f"{i+1}. {u['username']} - {u['total']}" for i, u in enumerate(data[:10])])
+async def leaderboard(ctx: discord.ApplicationContext):
+    leaderboard_data = get_leaderboard(guild_id=ctx.guild.id if ctx.guild else None)
+    text = "\n".join([f"{i+1}. {u['username']} - {u['total']}" for i, u in enumerate(leaderboard_data[:10])])
     await ctx.respond(f"📊 Top Chatters:\n{text}")
 
-@bot.slash_command(name="stats", description="Show message stats")
-async def stats(ctx):
-    guild_id = ctx.guild.id if ctx.guild else None
-    data = get_summary_stats(guild_id=guild_id)
-    await ctx.respond(f"📈 Total Messages: {data['total_messages']}\n"
-                      f"👥 Unique Users: {data['unique_users']}\n"
-                      f"🗓️ Today: {data['today']}")
+@bot.slash_command(name="stats", description="Show server stats")
+async def stats(ctx: discord.ApplicationContext):
+    stats_data = get_summary_stats(guild_id=ctx.guild.id if ctx.guild else None)
+    await ctx.respond(f"📈 Total Messages: {stats_data['total_messages']}\n"
+                      f"👥 Unique Users: {stats_data['unique_users']}\n"
+                      f"🗓️ Today: {stats_data['today']}")
 
 @bot.slash_command(name="rising", description="Show rising users")
-async def rising(ctx):
-    guild_id = ctx.guild.id if ctx.guild else None
-    data = get_rising_users(guild_id=guild_id)
-    text = "\n".join([f"{u['username']}: +{u['growth_pct']}%" for u in data[:10]])
+async def rising(ctx: discord.ApplicationContext):
+    rising_data = get_rising_users(guild_id=ctx.guild.id if ctx.guild else None)
+    text = "\n".join([f"{u['username']}: +{u['growth_pct']}%" for u in rising_data[:10]])
     await ctx.respond(f"🚀 Rising Stars:\n{text}")
 
 # ── Main ─────────────────────────────────────────────────────────────────────
@@ -306,11 +277,11 @@ if __name__ == "__main__":
     init_db()
     print("🗄️  Database initialized.")
 
-    # Start Flask in a background thread
+    # Start Flask in background thread
     threading.Thread(target=run_flask, daemon=True).start()
     print(f"🌐 Dashboard API started on port {FLASK_PORT}")
 
-    # Run the Discord bot
+    # Run Discord bot
     if TOKEN:
         bot.run(TOKEN)
     else:
