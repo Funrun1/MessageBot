@@ -4,8 +4,7 @@ import threading
 from datetime import datetime, timedelta, timezone
 
 import discord
-from discord.commands import Option  # Correct import for discord.py >=2.0
-from discord.ext import commands
+from discord import app_commands
 from flask import Flask, jsonify
 from flask_cors import CORS
 from dotenv import load_dotenv
@@ -16,7 +15,7 @@ TOKEN = os.getenv("DISCORD_BOT_TOKEN")
 FLASK_PORT = int(os.getenv("PORT", 5000))
 
 if not TOKEN:
-    raise ValueError("⚠️  DISCORD_BOT_TOKEN is missing in environment variables.")
+    raise ValueError("⚠️ DISCORD_BOT_TOKEN is missing in environment variables.")
 
 # ── Database setup ───────────────────────────────────────────────────────────
 BASE_DIR = os.path.dirname(__file__)
@@ -53,7 +52,7 @@ def record_message(user_id, username, guild_id, channel_id):
     conn.commit()
     conn.close()
 
-# ── Stats queries ────────────────────────────────────────────────────────────
+# ── Stats functions ──────────────────────────────────────────────────────────
 def get_leaderboard(guild_id=None, limit=20):
     conn = get_db()
     if guild_id:
@@ -192,13 +191,16 @@ def run_flask():
 intents = discord.Intents.default()
 intents.message_content = True
 intents.members = True
-bot = commands.Bot(command_prefix="!", intents=intents)
+bot = discord.Bot(intents=intents)  # correct Bot for slash commands
 
 @bot.event
 async def on_ready():
     print(f"✅ Logged in as {bot.user} (ID: {bot.user.id})")
     print(f"📊 Dashboard API: http://localhost:{FLASK_PORT}")
     print(f"📁 Database: {DB_PATH}")
+    # Sync slash commands to Discord
+    await bot.tree.sync()
+    print("🌐 Slash commands synced!")
 
 @bot.event
 async def on_message(message):
@@ -210,37 +212,37 @@ async def on_message(message):
         guild_id=message.guild.id if message.guild else "DM",
         channel_id=message.channel.id
     )
-    await bot.process_commands(message)  # important for commands to work
 
 # ── Slash Commands ───────────────────────────────────────────────────────────
-@bot.slash_command(name="leaderboard", description="Show top chatters")
-async def leaderboard(ctx):
-    data = get_leaderboard(guild_id=ctx.guild.id if ctx.guild else None)
+@bot.tree.command(name="leaderboard", description="Show top chatters")
+async def leaderboard(interaction: discord.Interaction):
+    data = get_leaderboard(guild_id=interaction.guild.id if interaction.guild else None)
     text = "\n".join([f"{i+1}. {u['username']} - {u['total']}" for i, u in enumerate(data[:10])])
-    await ctx.respond(f"📊 Top Chatters:\n{text}")
+    await interaction.response.send_message(f"📊 Top Chatters:\n{text}")
 
-@bot.slash_command(name="stats", description="Show server stats")
-async def stats(ctx):
-    data = get_summary_stats(guild_id=ctx.guild.id if ctx.guild else None)
-    await ctx.respond(f"📈 Total Messages: {data['total_messages']}\n👥 Unique Users: {data['unique_users']}\n🗓️ Today: {data['today']}")
+@bot.tree.command(name="stats", description="Show server stats")
+async def stats(interaction: discord.Interaction):
+    data = get_summary_stats(guild_id=interaction.guild.id if interaction.guild else None)
+    await interaction.response.send_message(f"📈 Total Messages: {data['total_messages']}\n👥 Unique Users: {data['unique_users']}\n🗓️ Today: {data['today']}")
 
-@bot.slash_command(name="rising", description="Show rising chatters")
-async def rising(ctx):
-    data = get_rising_users(guild_id=ctx.guild.id if ctx.guild else None)
+@bot.tree.command(name="rising", description="Show rising chatters")
+async def rising(interaction: discord.Interaction):
+    data = get_rising_users(guild_id=interaction.guild.id if interaction.guild else None)
     text = "\n".join([f"{u['username']}: +{u['growth_pct']}%" for u in data[:10]])
-    await ctx.respond(f"🚀 Rising Stars:\n{text}")
+    await interaction.response.send_message(f"🚀 Rising Stars:\n{text}")
 
-@bot.slash_command(name="daily", description="Show daily message counts")
-async def daily(ctx):
-    data = get_daily_counts(guild_id=ctx.guild.id if ctx.guild else None)
+@bot.tree.command(name="daily", description="Show daily message counts")
+async def daily(interaction: discord.Interaction):
+    data = get_daily_counts(guild_id=interaction.guild.id if interaction.guild else None)
     text = "\n".join([f"{r['day']}: {r['count']}" for r in data])
-    await ctx.respond(f"🗓️ Daily Messages:\n{text}")
+    await interaction.response.send_message(f"🗓️ Daily Messages:\n{text}")
 
-@bot.slash_command(name="user_trend", description="Show a user's message trend")
-async def user_trend(ctx, user: Option(discord.User, "Select a user")):
-    data = get_user_trend(user_id=user.id, guild_id=ctx.guild.id if ctx.guild else None)
+@bot.tree.command(name="user_trend", description="Show a user's message trend")
+@app_commands.describe(user="Select a user")
+async def user_trend(interaction: discord.Interaction, user: discord.User):
+    data = get_user_trend(user_id=user.id, guild_id=interaction.guild.id if interaction.guild else None)
     text = "\n".join([f"{r['day']}: {r['count']}" for r in data])
-    await ctx.respond(f"📈 Message Trend for {user}:\n{text}")
+    await interaction.response.send_message(f"📈 Message Trend for {user}:\n{text}")
 
 # ── Main ─────────────────────────────────────────────────────────────────────
 if __name__ == "__main__":
