@@ -18,15 +18,13 @@ from flask_cors import CORS
 # ── Config ──────────────────────────────────────────────────────────────────
 BASE_DIR = os.path.dirname(__file__)
 DB_PATH = os.path.join(BASE_DIR, "message_stats.db")
-FLASK_PORT = int(os.environ.get("PORT", 5000))  # Render assigns PORT automatically
+FLASK_PORT = int(os.environ.get("PORT", 5000))  # Render sets PORT automatically
 
 # Discord token from environment variable
 TOKEN = os.getenv("DISCORD_BOT_TOKEN")
-print("Loaded token:", TOKEN)
-
 if not TOKEN:
-    print("⚠️  Discord bot token is missing! Set DISCORD_BOT_TOKEN in Render environment variables.")
-    exit(1)
+    print("⚠️  No bot token set! Set DISCORD_BOT_TOKEN in environment variables.")
+    TOKEN = None
 
 # ── Database setup ───────────────────────────────────────────────────────────
 def get_db():
@@ -203,7 +201,7 @@ def get_rising_users(guild_id=None, days_recent=7, days_compare=7):
         pct = ((new - old) / old * 100) if old else (100.0 if new > 0 else 0.0)
         results.append({
             "user_id": uid,
-            "username": r.get("username", "Unknown"),
+            "username": r["username"],
             "recent": new,
             "previous": old,
             "growth_pct": round(pct, 1)
@@ -221,7 +219,7 @@ def get_summary_stats(guild_id=None):
         ).fetchone()[0]
     else:
         total = conn.execute("SELECT COUNT(*) FROM messages").fetchone()[0]
-        users = conn.execute("SELECT COUNT(DISTINCT user_id)").fetchone()[0]
+        users = conn.execute("SELECT COUNT(DISTINCT user_id) FROM messages").fetchone()[0]
         today = conn.execute("SELECT COUNT(*) FROM messages WHERE DATE(timestamp) = DATE('now')").fetchone()[0]
     conn.close()
     return {"total_messages": total, "unique_users": users, "today": today}
@@ -266,7 +264,7 @@ bot = discord.Client(intents=intents)
 @bot.event
 async def on_ready():
     print(f"✅ Logged in as {bot.user} (ID: {bot.user.id})")
-    print(f"🌐 Dashboard API running on port {FLASK_PORT}")
+    print(f"📊 Dashboard API: http://localhost:{FLASK_PORT}")
     print(f"📁 Database:  {DB_PATH}")
 
 @bot.event
@@ -274,6 +272,7 @@ async def on_message(message):
     if message.author.bot:
         return
 
+    # Record message in DB
     record_message(
         user_id=message.author.id,
         username=str(message.author),
@@ -281,16 +280,19 @@ async def on_message(message):
         channel_id=message.channel.id
     )
 
+    # Discord commands
     content = message.content.lower()
     if content == "!leaderboard":
         leaderboard = get_leaderboard(guild_id=message.guild.id if message.guild else None)
         text = "\n".join([f"{i+1}. {u['username']} - {u['total']}" for i, u in enumerate(leaderboard[:10])])
         await message.channel.send(f"📊 Top Chatters:\n{text}")
+
     elif content == "!stats":
         stats = get_summary_stats(guild_id=message.guild.id if message.guild else None)
         await message.channel.send(f"📈 Total Messages: {stats['total_messages']}\n"
                                    f"👥 Unique Users: {stats['unique_users']}\n"
                                    f"🗓️ Today: {stats['today']}")
+
     elif content == "!rising":
         rising = get_rising_users(guild_id=message.guild.id if message.guild else None)
         text = "\n".join([f"{u['username']}: +{u['growth_pct']}%" for u in rising[:10]])
@@ -301,7 +303,14 @@ if __name__ == "__main__":
     init_db()
     print("🗄️  Database initialized.")
 
+    # Start Flask in a background thread
     threading.Thread(target=run_flask, daemon=True).start()
     print(f"🌐 Dashboard API started on port {FLASK_PORT}")
 
-    bot.run(TOKEN)
+    # Run the Discord bot
+    if not TOKEN:
+        print("⚠️  Discord bot token is missing! Cannot start bot.")
+        while True:
+            time.sleep(1)
+    else:
+        bot.run(TOKEN)
